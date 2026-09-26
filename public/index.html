@@ -58,6 +58,28 @@
           <input id="cloth-length" type="text" inputmode="numeric" placeholder="例如：1000000" />
         </div>
 
+        <div class="rollers-head intervals-head">
+          <h2>禁印区间（布面瑕疵避让，至多 20 个）</h2>
+          <div class="roller-actions">
+            <button id="btn-add-interval" type="button" class="btn btn-secondary">＋ 添加区间</button>
+          </div>
+        </div>
+        <p class="hint" id="intervals-empty">未录入禁印区间：布面上全部对花点均可用。</p>
+        <div class="table-wrap" id="intervals-table-wrap" hidden>
+          <table class="rollers-table intervals-table">
+            <thead>
+              <tr>
+                <th style="width:4rem">#</th>
+                <th>起点（毫米，含端点）</th>
+                <th>终点（毫米，含端点）</th>
+                <th style="width:5rem"></th>
+              </tr>
+            </thead>
+            <tbody id="intervals-body"></tbody>
+          </table>
+        </div>
+        <p class="hint">区间起止均为十进制整数，需满足 <code>0 ≤ 起点 ≤ 终点 ≤ 布长</code>；区间端点同样禁印。试算时会先合并重叠或相邻的区间，再扣除落在区间内的对花点。</p>
+
         <p class="hint">提示：所有整数均按任意精度十进制处理，可安全输入超过 JavaScript 安全整数范围（2<sup>53</sup>−1）的数值；对花位置范围取 <code>0 ≤ x ≤ 布长</code>（含布头 0 mm 与布长端点）。</p>
 
         <div class="form-actions">
@@ -129,7 +151,28 @@
           </table>
           <p class="formula">全部对花位置：<code>x = <span id="res-formula-first"></span> + k × <span id="res-formula-period"></span></code>（k = 0,1,2,…）</p>
 
-          <h3>布长内最早的 20 个对花位置</h3>
+          <h3>布面瑕疵避让</h3>
+          <p id="avoidance-none" class="hint">未录入禁印区间，全部对花点均可用。</p>
+          <div id="avoidance-active" hidden>
+            <table class="kv-table">
+              <tbody>
+                <tr>
+                  <th>合并后禁印区间<br /><small>（重叠/相邻已合并，含端点）</small></th>
+                  <td id="avoid-intervals"></td>
+                </tr>
+                <tr>
+                  <th>被排除对花点数</th>
+                  <td><span class="big-num" id="avoid-excluded"></span> 个</td>
+                </tr>
+                <tr>
+                  <th>可用对花点总数</th>
+                  <td><span class="big-num" id="avoid-usable"></span> 个</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3 id="positions-title">布长内最早的 20 个对花位置</h3>
           <div class="table-wrap">
             <table class="positions-table">
               <thead>

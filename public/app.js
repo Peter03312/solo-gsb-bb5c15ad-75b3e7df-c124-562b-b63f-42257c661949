@@ -16,6 +16,10 @@ const els = {
   btnAdd: document.getElementById('btn-add-roller'),
   btnRemove: document.getElementById('btn-remove-roller'),
   cloth: document.getElementById('cloth-length'),
+  btnAddInterval: document.getElementById('btn-add-interval'),
+  intervalsBody: document.getElementById('intervals-body'),
+  intervalsEmpty: document.getElementById('intervals-empty'),
+  intervalsWrap: document.getElementById('intervals-table-wrap'),
   btnSolve: document.getElementById('btn-solve'),
   btnSave: document.getElementById('btn-save'),
   btnSaveAs: document.getElementById('btn-save-as'),
@@ -37,6 +41,12 @@ const els = {
   resTotal: document.getElementById('res-total'),
   formulaFirst: document.getElementById('res-formula-first'),
   formulaPeriod: document.getElementById('res-formula-period'),
+  avoidanceNone: document.getElementById('avoidance-none'),
+  avoidanceActive: document.getElementById('avoidance-active'),
+  avoidIntervals: document.getElementById('avoid-intervals'),
+  avoidExcluded: document.getElementById('avoid-excluded'),
+  avoidUsable: document.getElementById('avoid-usable'),
+  positionsTitle: document.getElementById('positions-title'),
   positionsBody: document.getElementById('positions-body'),
   positionsNote: document.getElementById('positions-note'),
 };
@@ -118,6 +128,59 @@ function updateRollerButtons(count) {
   els.btnRemove.disabled = count <= 2;
 }
 
+/* ---------------- 禁印区间 ---------------- */
+
+const MAX_INTERVALS = 20;
+
+function intervalRow(index, start = '', end = '') {
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td class="roller-index"></td>
+    <td><input type="text" inputmode="numeric" class="input-iv-start" placeholder="如 1200"></td>
+    <td><input type="text" inputmode="numeric" class="input-iv-end" placeholder="如 3500"></td>
+    <td></td>
+  `;
+  tr.querySelector('.roller-index').textContent = index;
+  tr.querySelector('.input-iv-start').value = start;
+  tr.querySelector('.input-iv-end').value = end;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'btn btn-danger btn-small';
+  btn.textContent = '删除';
+  btn.addEventListener('click', () => {
+    tr.remove();
+    renumberIntervals();
+    scheduleSolve();
+  });
+  tr.lastElementChild.appendChild(btn);
+  return tr;
+}
+
+function renumberIntervals() {
+  const rows = [...els.intervalsBody.querySelectorAll('tr')];
+  rows.forEach((tr, i) => {
+    tr.querySelector('.roller-index').textContent = i + 1;
+  });
+  els.intervalsEmpty.hidden = rows.length > 0;
+  els.intervalsWrap.hidden = rows.length === 0;
+  els.btnAddInterval.disabled = rows.length >= MAX_INTERVALS;
+}
+
+function setIntervals(list) {
+  els.intervalsBody.innerHTML = '';
+  for (let i = 0; i < list.length; i++) {
+    els.intervalsBody.appendChild(intervalRow(i + 1, list[i].start, list[i].end));
+  }
+  renumberIntervals();
+}
+
+function readIntervals() {
+  return [...els.intervalsBody.querySelectorAll('tr')].map((tr) => ({
+    start: tr.querySelector('.input-iv-start').value.trim(),
+    end: tr.querySelector('.input-iv-end').value.trim(),
+  }));
+}
+
 function readForm() {
   const rows = [...els.rollersBody.querySelectorAll('tr')];
   return {
@@ -127,6 +190,7 @@ function readForm() {
       perimeter: tr.querySelector('.input-perimeter').value.trim(),
       offset: tr.querySelector('.input-offset').value.trim(),
     })),
+    forbiddenIntervals: readIntervals(),
   };
 }
 
@@ -134,6 +198,8 @@ function loadIntoForm(scheme) {
   els.name.value = scheme.name || '';
   els.cloth.value = scheme.clothLength ?? '';
   setRollerCount(scheme.rollers.length, scheme.rollers);
+  // 旧方案没有该字段时视为空区间列表
+  setIntervals(Array.isArray(scheme.forbiddenIntervals) ? scheme.forbiddenIntervals : []);
 }
 
 function resetForm() {
@@ -143,6 +209,7 @@ function resetForm() {
     { perimeter: '640', offset: '0' },
     { perimeter: '800', offset: '0' },
   ]);
+  setIntervals([]);
 }
 
 /* ---------------- 客户端预检 ---------------- */
@@ -163,6 +230,25 @@ function prevalidate(data) {
     if (r.offset.length <= 120 && r.perimeter.length <= 120 &&
         BigInt(r.offset) >= BigInt(r.perimeter)) {
       return `色筒 ${i + 1} 的标记偏移必须小于重复周长`;
+    }
+  }
+  const intervals = data.forbiddenIntervals || [];
+  if (intervals.length > MAX_INTERVALS) {
+    return `禁印区间最多 ${MAX_INTERVALS} 个`;
+  }
+  for (let i = 0; i < intervals.length; i++) {
+    const iv = intervals[i];
+    if (!DECIMAL_INTEGER.test(iv.start) || !DECIMAL_INTEGER.test(iv.end)) {
+      return `禁印区间 ${i + 1} 的起点与终点必须是十进制非负整数`;
+    }
+    // 同样仅在位数不超限的前提下做大小比较，超出时交给服务端报错
+    if (iv.start.length <= 120 && iv.end.length <= 120 &&
+        BigInt(iv.start) > BigInt(iv.end)) {
+      return `禁印区间 ${i + 1} 的起点不能大于终点`;
+    }
+    if (data.clothLength.length <= 120 && iv.end.length <= 120 &&
+        BigInt(iv.end) > BigInt(data.clothLength)) {
+      return `禁印区间 ${i + 1} 的终点不能超过布长`;
     }
   }
   return null;
@@ -228,28 +314,70 @@ function renderResult(result, formData) {
   els.formulaFirst.textContent = groupThousands(result.firstPosition);
   els.formulaPeriod.textContent = groupThousands(result.period);
 
+  // 布面瑕疵避让：有禁印区间时展示合并结果与扣除统计，
+  // 位置表切换为“扣除后”的可用对花点。
+  const avoidance = result.avoidance || { intervals: [], excluded: '0', usableTotal: result.withinCloth.total };
+  const avoidOn = avoidance.intervals.length > 0;
+  els.avoidanceNone.hidden = avoidOn;
+  els.avoidanceActive.hidden = !avoidOn;
+  if (avoidOn) {
+    els.avoidIntervals.innerHTML = '';
+    avoidance.intervals.forEach((iv, i) => {
+      const chip = document.createElement('span');
+      chip.className = 'interval-chip';
+      chip.textContent = `${groupThousands(iv.start)} ～ ${groupThousands(iv.end)}`;
+      els.avoidIntervals.appendChild(chip);
+      if (i < avoidance.intervals.length - 1) {
+        els.avoidIntervals.appendChild(document.createTextNode('、'));
+      }
+    });
+    els.avoidExcluded.textContent = groupThousands(avoidance.excluded);
+    els.avoidUsable.textContent = groupThousands(avoidance.usableTotal);
+  }
+
+  const shownPositions = avoidOn ? avoidance.positions : result.withinCloth.positions;
+  const shownTotal = avoidOn ? avoidance.usableTotal : result.withinCloth.total;
+  els.positionsTitle.textContent = avoidOn
+    ? '布长内最早的 20 个可用对花位置（已避开禁印区间）'
+    : '布长内最早的 20 个对花位置';
+
   // 布长内位置表（剩余布长用 BigInt 计算，保持精度）。
   const cloth = BigInt(result.clothLength);
   const period = BigInt(result.period);
   els.positionsBody.innerHTML = '';
-  for (let k = 0; k < result.withinCloth.positions.length; k++) {
-    const p = result.withinCloth.positions[k];
+  for (let k = 0; k < shownPositions.length; k++) {
+    const p = shownPositions[k];
     const remain = cloth - BigInt(p);
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${k}</td><td>${groupThousands(p)}</td><td>${groupThousands(remain.toString())}</td>`;
     els.positionsBody.appendChild(tr);
   }
 
-  const total = BigInt(result.withinCloth.total);
-  const shown = BigInt(result.withinCloth.positions.length);
-  if (total === 0n) {
+  const total = BigInt(shownTotal);
+  const shown = BigInt(shownPositions.length);
+  if (BigInt(result.withinCloth.total) === 0n) {
     els.positionsNote.textContent =
       '布长范围内没有对花点：首次对花位置已超过布长。可加大布长或调整偏移后重新计算。';
-  } else if (total > shown) {
-    const firstUnshown = (BigInt(result.firstPosition) + period * shown).toString();
+  } else if (avoidOn && total === 0n) {
     els.positionsNote.textContent =
-      `仅显示最早的 ${result.withinCloth.limit} 个；布长内共 ${groupThousands(total.toString())} 个，` +
-      `第 ${result.withinCloth.limit + 1} 个位于 ${groupThousands(firstUnshown)} 毫米处。`;
+      `全部 ${groupThousands(result.withinCloth.total)} 个对花点都落在禁印区间内，无可用位置。` +
+      '可调整禁印区间或色筒参数后重新计算。';
+  } else if (total > shown) {
+    const limit = avoidOn ? avoidance.limit : result.withinCloth.limit;
+    if (avoidOn) {
+      els.positionsNote.textContent =
+        `仅显示最早的 ${limit} 个可用位置；可用对花点共 ${groupThousands(total.toString())} 个` +
+        `（已排除 ${groupThousands(avoidance.excluded)} 个落在禁印区间内的点）。`;
+    } else {
+      const firstUnshown = (BigInt(result.firstPosition) + period * shown).toString();
+      els.positionsNote.textContent =
+        `仅显示最早的 ${result.withinCloth.limit} 个；布长内共 ${groupThousands(total.toString())} 个，` +
+        `第 ${result.withinCloth.limit + 1} 个位于 ${groupThousands(firstUnshown)} 毫米处。`;
+    }
+  } else if (avoidOn) {
+    els.positionsNote.textContent =
+      `可用对花点共 ${groupThousands(total.toString())} 个，已全部列出` +
+      `（已排除 ${groupThousands(avoidance.excluded)} 个落在禁印区间内的点）。`;
   } else {
     els.positionsNote.textContent =
       `布长内共 ${groupThousands(total.toString())} 个对花点，已全部列出（位置区间 0 ≤ x ≤ 布长）。`;
@@ -317,9 +445,10 @@ async function refreshList(selectId) {
     const li = document.createElement('li');
     li.className = 'scheme-item' + (s.id === selectId ? ' active' : '');
     li.dataset.id = s.id;
+    const ivCount = Array.isArray(s.forbiddenIntervals) ? s.forbiddenIntervals.length : 0;
     li.innerHTML = `
       <div class="s-name"></div>
-      <div class="s-meta">${s.rollers.length} 色 · 布长 <span class="meta-cloth"></span> mm</div>
+      <div class="s-meta">${s.rollers.length} 色 · 布长 <span class="meta-cloth"></span> mm${ivCount > 0 ? ` · 避让 ${ivCount} 段` : ''}</div>
     `;
     li.querySelector('.s-name').textContent = s.name || '（未命名方案）';
     li.querySelector('.meta-cloth').textContent = groupThousands(s.clothLength);
@@ -418,6 +547,14 @@ els.btnRemove.addEventListener('click', () => {
 
 els.rollersBody.addEventListener('input', scheduleSolve);
 els.cloth.addEventListener('input', scheduleSolve);
+els.btnAddInterval.addEventListener('click', () => {
+  const rows = [...els.intervalsBody.querySelectorAll('tr')];
+  if (rows.length >= MAX_INTERVALS) return;
+  els.intervalsBody.appendChild(intervalRow(rows.length + 1));
+  renumberIntervals();
+  scheduleSolve();
+});
+els.intervalsBody.addEventListener('input', scheduleSolve);
 els.btnSolve.addEventListener('click', solve);
 els.btnSave.addEventListener('click', () => saveScheme('update'));
 els.btnSaveAs.addEventListener('click', () => saveScheme('create'));

@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    image: roller-registration:latest
+    container_name: roller-registration
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # 容器内固定监听 3000；宿主机端口由上方 PORT 变量控制
+      PORT: "3000"
+      DATA_FILE: /app/data/schemes.json
+    volumes:
+      # 方案 JSON 持久化到宿主机 ./data，容器重建不丢失
+      - ./data:/app/data
+    restart: unless-stopped

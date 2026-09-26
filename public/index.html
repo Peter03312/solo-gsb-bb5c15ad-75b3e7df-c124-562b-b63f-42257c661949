@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>多色滚筒套准点校核</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>多色滚筒套准点校核</h1>
+    <p class="subtitle">输入各色筒的重复周长与标记偏移，计算首次同时对花位置、共同重复周期及布长内对花点</p>
+  </header>
+
+  <main class="layout">
+    <!-- 左：方案列表 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <h2>已保存方案</h2>
+        <button id="btn-new" type="button" class="btn btn-secondary">＋ 新建</button>
+      </div>
+      <ul id="scheme-list" class="scheme-list"></ul>
+    </aside>
+
+    <!-- 右：编辑 + 结果 -->
+    <section class="content">
+      <div id="error-banner" class="banner banner-error" hidden></div>
+
+      <form id="editor-form" class="card">
+        <div class="form-row">
+          <label for="scheme-name">方案名称</label>
+          <input id="scheme-name" type="text" maxlength="50" placeholder="例如：第 3 号机台 / 八色花型" />
+        </div>
+
+        <div class="rollers-head">
+          <h2>色筒参数（2～8 个）</h2>
+          <div class="roller-actions">
+            <button id="btn-add-roller" type="button" class="btn btn-secondary">＋ 添加色筒</button>
+            <button id="btn-remove-roller" type="button" class="btn btn-secondary">－ 删除末个</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table class="rollers-table">
+            <thead>
+              <tr>
+                <th style="width:4rem">#</th>
+                <th>重复周长（毫米，正整数）</th>
+                <th>标记偏移（毫米，0 ≤ 偏移 &lt; 周长）</th>
+              </tr>
+            </thead>
+            <tbody id="rollers-body"></tbody>
+          </table>
+        </div>
+
+        <div class="form-row cloth-row">
+          <label for="cloth-length">布长（毫米，非负整数）</label>
+          <input id="cloth-length" type="text" inputmode="numeric" placeholder="例如：1000000" />
+        </div>
+
+        <p class="hint">提示：所有整数均按任意精度十进制处理，可安全输入超过 JavaScript 安全整数范围（2<sup>53</sup>−1）的数值；对花位置范围取 <code>0 ≤ x ≤ 布长</code>（含布头 0 mm 与布长端点）。</p>
+
+        <div class="form-actions">
+          <button id="btn-solve" type="button" class="btn btn-primary">重新计算</button>
+          <button id="btn-save" type="button" class="btn btn-save">保存方案</button>
+          <button id="btn-save-as" type="button" class="btn btn-secondary">另存为新方案</button>
+          <button id="btn-delete" type="button" class="btn btn-danger" hidden>删除此方案</button>
+          <span id="save-status" class="save-status"></span>
+        </div>
+      </form>
+
+      <!-- 结果区 -->
+      <section class="card result-card" id="result-panel" aria-live="polite">
+        <h2>计算结果</h2>
+        <div id="result-empty" class="result-empty">请填写参数后点击“重新计算”（参数变更会自动计算）。</div>
+
+        <div id="result-conflict" hidden>
+          <div class="banner banner-error" id="conflict-message"></div>
+          <table class="kv-table">
+            <tbody>
+              <tr><th>互不相容色筒</th><td id="conflict-pair"></td></tr>
+              <tr><th>周长 / 偏移</th><td id="conflict-values"></td></tr>
+              <tr><th>判定依据</th><td id="conflict-reason"></td></tr>
+            </tbody>
+          </table>
+
+          <h3>单色筒偏移修正建议</h3>
+          <p class="hint">
+            以下建议均只修改某一个色筒的偏移（其余色筒保持不变）即可使全组有解；
+            调整量为环形最短位移（等距时取偏移增大方向），按调整量绝对值排序。
+            点击“采用”会把新偏移填入上方表单并重新试算，<b>不会自动保存</b>（保存仍用“保存方案”按钮）。
+          </p>
+          <div class="table-wrap" id="suggestions-table-wrap">
+            <table class="suggestions-table">
+              <thead>
+                <tr>
+                  <th style="width:4rem">色筒</th>
+                  <th>原偏移（毫米）</th>
+                  <th>建议新偏移（毫米）</th>
+                  <th>调整量（毫米）</th>
+                  <th style="width:6rem"></th>
+                </tr>
+              </thead>
+              <tbody id="suggestions-body"></tbody>
+            </table>
+          </div>
+          <p id="suggestions-empty" class="hint" hidden>
+            没有任何色筒能单独修复：无论固定哪一个色筒，其余色筒的同余式自身已无解，需同时调整至少两个色筒。
+          </p>
+          <p id="suggestions-unfixable" class="hint"></p>
+        </div>
+
+        <div id="result-ok" hidden>
+          <table class="kv-table">
+            <tbody>
+              <tr>
+                <th>首次同时对花位置</th>
+                <td><span class="big-num" id="res-first"></span> 毫米</td>
+              </tr>
+              <tr>
+                <th>共同重复周期<br /><small>（各周长的最小公倍数）</small></th>
+                <td><span class="big-num" id="res-period"></span> 毫米</td>
+              </tr>
+              <tr>
+                <th>布长内对花点总数</th>
+                <td><span class="big-num" id="res-total"></span> 个</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="formula">全部对花位置：<code>x = <span id="res-formula-first"></span> + k × <span id="res-formula-period"></span></code>（k = 0,1,2,…）</p>
+
+          <h3>布长内最早的 20 个对花位置</h3>
+          <div class="table-wrap">
+            <table class="positions-table">
+              <thead>
+                <tr><th style="width:4rem">序号 k</th><th style="width:30%">距布头（毫米）</th><th>剩余布长（毫米）</th></tr>
+              </thead>
+              <tbody id="positions-body"></tbody>
+            </table>
+          </div>
+          <p id="positions-note" class="hint"></p>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>

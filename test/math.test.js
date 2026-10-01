@@ -13,7 +13,11 @@ import {
   solve,
   positionsWithinCloth,
   suggestOffsetFixes,
+  mergeIntervals,
+  avoidForbiddenIntervals,
 } from '../lib/crt.js';
+import { validateScheme } from '../lib/validation.js';
+import { solveBody } from '../lib/solver.js';
 
 let passed = 0;
 function test(name, fn) {
@@ -217,6 +221,213 @@ test('修正建议：超大整数场景，且每条建议都能使全组有解',
     );
     assert.equal(solve(next).solvable, true);
   }
+});
+
+test('区间合并：重叠、相邻、包含、无序输入', () => {
+  const merged = mergeIntervals([
+    { start: 9n, end: 20n },  // 与 [5,8] 相邻（9 = 8+1）→ 合并为 [5,20]
+    { start: 5n, end: 8n },
+    { start: 21n, end: 25n }, // 与 [5,20] 相邻（21 = 20+1）→ 合并为 [5,25]
+    { start: 30n, end: 35n },
+    { start: 6n, end: 7n },   // 含于 [5,8]
+  ]);
+  assert.deepEqual(merged, [
+    { start: 5n, end: 25n },
+    { start: 30n, end: 35n },
+  ]);
+  // 间隔 ≥ 1 个可用整数点的区间不合并：[5,8] 与 [10,20] 之间隔着 9
+  assert.deepEqual(
+    mergeIntervals([
+      { start: 5n, end: 8n },
+      { start: 10n, end: 20n },
+    ]),
+    [
+      { start: 5n, end: 8n },
+      { start: 10n, end: 20n },
+    ]
+  );
+  // 空输入
+  assert.deepEqual(mergeIntervals([]), []);
+});
+
+test('瑕疵避让：端点不可用，按边界公式计数', () => {
+  // first=0, period=10，布长 100 → 0,10,…,100 共 11 点
+  // [10,20] 排除 10、20（端点同样禁印）；[55,65] 只排除 60
+  const av = avoidForbiddenIntervals(0n, 10n, 100n, [
+    { start: 10n, end: 20n },
+    { start: 55n, end: 65n },
+  ], 20);
+  assert.equal(av.total, 11n);
+  assert.equal(av.excluded, 3n);
+  assert.equal(av.usable, 8n);
+  assert.deepEqual(av.positions, [0n, 30n, 40n, 50n, 70n, 80n, 90n, 100n]);
+  assert.deepEqual(av.merged, [
+    { start: 10n, end: 20n },
+    { start: 55n, end: 65n },
+  ]);
+});
+
+test('瑕疵避让：相邻区间先合并再连续扣除', () => {
+  // [10,19] 与 [20,30] 相邻 → 合并为 [10,30]，排除 10、20、30
+  const av = avoidForbiddenIntervals(0n, 10n, 50n, [
+    { start: 10n, end: 19n },
+    { start: 20n, end: 30n },
+  ], 20);
+  assert.deepEqual(av.merged, [{ start: 10n, end: 30n }]);
+  assert.equal(av.excluded, 3n);
+  assert.equal(av.usable, 3n);
+  assert.deepEqual(av.positions, [0n, 40n, 50n]);
+});
+
+test('瑕疵避让：空区间等价原序列', () => {
+  const av = avoidForbiddenIntervals(10n, 24n, 100n, [], 20);
+  assert.equal(av.total, 4n);
+  assert.equal(av.excluded, 0n);
+  assert.equal(av.usable, 4n);
+  assert.deepEqual(av.positions, [10n, 34n, 58n, 82n]);
+});
+
+test('瑕疵避让：首次对花超过布长时全部为零', () => {
+  const av = avoidForbiddenIntervals(200n, 24n, 100n, [{ start: 0n, end: 100n }], 20);
+  assert.equal(av.total, 0n);
+  assert.equal(av.excluded, 0n);
+  assert.equal(av.usable, 0n);
+  assert.deepEqual(av.positions, []);
+});
+
+test('瑕疵避让：limit 截断且按区间边界跳跃（不逐点扫描）', () => {
+  // period=1，布长 100 → 101 个点；[0,90] 排除前 91 个
+  const av = avoidForbiddenIntervals(0n, 1n, 100n, [{ start: 0n, end: 90n }], 5);
+  assert.equal(av.total, 101n);
+  assert.equal(av.excluded, 91n);
+  assert.equal(av.usable, 10n);
+  assert.deepEqual(av.positions, [91n, 92n, 93n, 94n, 95n]);
+});
+
+test('瑕疵避让：天文数字级对花点也能按公式即时计数', () => {
+  // period = 10^30，布长 = 1000·period → 对花点 0,P,…,1000P 共 1001 个
+  const P = 10n ** 30n;
+  const cloth = P * 1000n;
+  // 区间 [3P, 997P] 覆盖第 3～997 个点（共 995 个）
+  const av = avoidForbiddenIntervals(0n, P, cloth, [
+    { start: 3n * P, end: 997n * P },
+  ], 20);
+  assert.equal(av.total, 1001n);
+  assert.equal(av.excluded, 995n);
+  assert.equal(av.usable, 6n);
+  assert.deepEqual(av.positions, [0n, P, 2n * P, 998n * P, 999n * P, 1000n * P]);
+});
+
+test('校验：旧方案缺少 forbiddenIntervals 字段时视为空', () => {
+  const out = validateScheme({
+    name: '旧方案',
+    clothLength: '100',
+    rollers: [
+      { perimeter: '6', offset: '0' },
+      { perimeter: '4', offset: '2' },
+    ],
+  });
+  assert.equal(out.ok, true);
+  assert.deepEqual(out.data.forbiddenIntervals, []);
+  assert.deepEqual(out.bigints.forbiddenIntervals, []);
+});
+
+test('校验：禁印区间需满足 0 ≤ 起点 ≤ 终点 ≤ 布长', () => {
+  const base = {
+    name: '',
+    clothLength: '100',
+    rollers: [
+      { perimeter: '6', offset: '0' },
+      { perimeter: '4', offset: '2' },
+    ],
+  };
+  // 起点 > 终点
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: [{ start: '50', end: '40' }] }).ok, false);
+  // 终点 > 布长
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: [{ start: '0', end: '101' }] }).ok, false);
+  // 非十进制整数
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: [{ start: '1.5', end: '10' }] }).ok, false);
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: [{ start: '-3', end: '10' }] }).ok, false);
+  // 非数组
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: 'x' }).ok, false);
+  // 合法：端点可以等于布长（闭区间，端点同样禁印）
+  const ok = validateScheme({ ...base, forbiddenIntervals: [{ start: '0', end: '100' }] });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(ok.data.forbiddenIntervals, [{ start: '0', end: '100' }]);
+  assert.deepEqual(ok.bigints.forbiddenIntervals, [{ start: 0n, end: 100n }]);
+});
+
+test('校验：禁印区间至多 20 个', () => {
+  const base = {
+    name: '',
+    clothLength: '1000',
+    rollers: [
+      { perimeter: '6', offset: '0' },
+      { perimeter: '4', offset: '2' },
+    ],
+  };
+  const mk = (n) => Array.from({ length: n }, (_, i) => ({ start: String(i), end: String(i) }));
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: mk(20) }).ok, true);
+  assert.equal(validateScheme({ ...base, forbiddenIntervals: mk(21) }).ok, false);
+});
+
+test('solveBody：有解且带禁印区间时返回避让统计', () => {
+  const out = solveBody({
+    name: '',
+    clothLength: '100',
+    rollers: [
+      { perimeter: '10', offset: '0' },
+      { perimeter: '20', offset: '0' },
+    ],
+    forbiddenIntervals: [
+      { start: '10', end: '20' },
+      { start: '55', end: '65' },
+    ],
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.result.solvable, true);
+  // 对花点 0,20,40,60,80,100 共 6 个；[10,20] 排除 20，[55,65] 排除 60
+  assert.equal(out.result.withinCloth.total, '6');
+  assert.equal(out.result.avoidance.inputCount, 2);
+  assert.deepEqual(out.result.avoidance.mergedIntervals, [
+    { start: '10', end: '20' },
+    { start: '55', end: '65' },
+  ]);
+  assert.equal(out.result.avoidance.excluded, '2');
+  assert.equal(out.result.avoidance.usable, '4');
+  assert.deepEqual(out.result.avoidance.positions, ['0', '40', '80', '100']);
+});
+
+test('solveBody：无禁印区间时不返回 avoidance 字段', () => {
+  const out = solveBody({
+    name: '',
+    clothLength: '100',
+    rollers: [
+      { perimeter: '10', offset: '0' },
+      { perimeter: '20', offset: '0' },
+    ],
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.result.solvable, true);
+  assert.equal(out.result.avoidance, undefined);
+});
+
+test('solveBody：无解时沿用冲突与修正结果（不涉及避让）', () => {
+  const out = solveBody({
+    name: '',
+    clothLength: '1000',
+    rollers: [
+      { perimeter: '6', offset: '0' },
+      { perimeter: '4', offset: '3' },
+    ],
+    forbiddenIntervals: [{ start: '0', end: '500' }],
+  });
+  assert.equal(out.ok, true);
+  assert.equal(out.result.solvable, false);
+  assert.equal(out.result.conflict.rollerA, 1);
+  assert.equal(out.result.conflict.rollerB, 2);
+  assert.ok(Array.isArray(out.result.suggestions));
+  assert.equal(out.result.avoidance, undefined);
 });
 
 console.log(`\n全部 ${passed} 项测试通过 ✔\n`);

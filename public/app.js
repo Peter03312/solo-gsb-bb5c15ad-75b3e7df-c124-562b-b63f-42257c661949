@@ -16,6 +16,8 @@ const els = {
   btnAdd: document.getElementById('btn-add-roller'),
   btnRemove: document.getElementById('btn-remove-roller'),
   cloth: document.getElementById('cloth-length'),
+  intervalsBody: document.getElementById('intervals-body'),
+  btnAddInterval: document.getElementById('btn-add-interval'),
   btnSolve: document.getElementById('btn-solve'),
   btnSave: document.getElementById('btn-save'),
   btnSaveAs: document.getElementById('btn-save-as'),
@@ -39,6 +41,14 @@ const els = {
   formulaPeriod: document.getElementById('res-formula-period'),
   positionsBody: document.getElementById('positions-body'),
   positionsNote: document.getElementById('positions-note'),
+  avoidancePanel: document.getElementById('avoidance-panel'),
+  avInputCount: document.getElementById('av-input-count'),
+  avMergedCount: document.getElementById('av-merged-count'),
+  avMergedList: document.getElementById('av-merged-list'),
+  avExcluded: document.getElementById('av-excluded'),
+  avUsable: document.getElementById('av-usable'),
+  avPositionsBody: document.getElementById('av-positions-body'),
+  avPositionsNote: document.getElementById('av-positions-note'),
 };
 
 const state = {
@@ -118,6 +128,58 @@ function updateRollerButtons(count) {
   els.btnRemove.disabled = count <= 2;
 }
 
+/* ---------------- 禁印区间（布面瑕疵避让） ---------------- */
+
+function intervalRow(index, start = '', end = '') {
+  const tr = document.createElement('tr');
+  tr.className = 'interval-row';
+  tr.innerHTML = `
+    <td class="interval-index"></td>
+    <td><input type="text" inputmode="numeric" class="input-int-start" placeholder="如 1200"></td>
+    <td><input type="text" inputmode="numeric" class="input-int-end" placeholder="起点 ≤ 终点 ≤ 布长"></td>
+    <td class="interval-actions"><button type="button" class="btn btn-secondary btn-small btn-del-interval">删除</button></td>
+  `;
+  tr.querySelector('.interval-index').textContent = index;
+  tr.querySelector('.input-int-start').value = start;
+  tr.querySelector('.input-int-end').value = end;
+  return tr;
+}
+
+function intervalRows() {
+  return [...els.intervalsBody.querySelectorAll('tr.interval-row')];
+}
+
+function renumberIntervals() {
+  intervalRows().forEach((tr, i) => {
+    tr.querySelector('.interval-index').textContent = i + 1;
+  });
+}
+
+/** 刷新“添加”按钮可用状态与空态提示行。 */
+function updateIntervalUI() {
+  const rows = intervalRows();
+  els.btnAddInterval.disabled = rows.length >= 20;
+  let empty = els.intervalsBody.querySelector('tr.intervals-empty');
+  if (rows.length === 0) {
+    if (!empty) {
+      empty = document.createElement('tr');
+      empty.className = 'intervals-empty';
+      empty.innerHTML = '<td colspan="4">未设置禁印区间（布面有瑕疵段时可点击“＋ 添加区间”录入）</td>';
+      els.intervalsBody.appendChild(empty);
+    }
+  } else if (empty) {
+    empty.remove();
+  }
+}
+
+function setIntervals(list) {
+  els.intervalsBody.innerHTML = '';
+  for (let i = 0; i < list.length; i++) {
+    els.intervalsBody.appendChild(intervalRow(i + 1, list[i].start, list[i].end));
+  }
+  updateIntervalUI();
+}
+
 function readForm() {
   const rows = [...els.rollersBody.querySelectorAll('tr')];
   return {
@@ -127,6 +189,10 @@ function readForm() {
       perimeter: tr.querySelector('.input-perimeter').value.trim(),
       offset: tr.querySelector('.input-offset').value.trim(),
     })),
+    forbiddenIntervals: intervalRows().map((tr) => ({
+      start: tr.querySelector('.input-int-start').value.trim(),
+      end: tr.querySelector('.input-int-end').value.trim(),
+    })),
   };
 }
 
@@ -134,6 +200,8 @@ function loadIntoForm(scheme) {
   els.name.value = scheme.name || '';
   els.cloth.value = scheme.clothLength ?? '';
   setRollerCount(scheme.rollers.length, scheme.rollers);
+  // 旧方案缺少该字段时按空数组处理
+  setIntervals(scheme.forbiddenIntervals ?? []);
 }
 
 function resetForm() {
@@ -143,6 +211,7 @@ function resetForm() {
     { perimeter: '640', offset: '0' },
     { perimeter: '800', offset: '0' },
   ]);
+  setIntervals([]);
 }
 
 /* ---------------- 客户端预检 ---------------- */
@@ -163,6 +232,26 @@ function prevalidate(data) {
     if (r.offset.length <= 120 && r.perimeter.length <= 120 &&
         BigInt(r.offset) >= BigInt(r.perimeter)) {
       return `色筒 ${i + 1} 的标记偏移必须小于重复周长`;
+    }
+  }
+  if (data.forbiddenIntervals.length > 20) {
+    return '禁印区间最多 20 个';
+  }
+  for (let i = 0; i < data.forbiddenIntervals.length; i++) {
+    const iv = data.forbiddenIntervals[i];
+    if (!DECIMAL_INTEGER.test(iv.start)) {
+      return `禁印区间 ${i + 1} 的起点必须是非负整数（十进制，不超过 120 位）`;
+    }
+    if (!DECIMAL_INTEGER.test(iv.end)) {
+      return `禁印区间 ${i + 1} 的终点必须是非负整数（十进制，不超过 120 位）`;
+    }
+    if (iv.start.length <= 120 && iv.end.length <= 120) {
+      if (BigInt(iv.start) > BigInt(iv.end)) {
+        return `禁印区间 ${i + 1} 的起点不能大于终点`;
+      }
+      if (data.clothLength.length <= 120 && BigInt(iv.end) > BigInt(data.clothLength)) {
+        return `禁印区间 ${i + 1} 的终点不能超过布长`;
+      }
     }
   }
   return null;
@@ -253,6 +342,49 @@ function renderResult(result, formData) {
   } else {
     els.positionsNote.textContent =
       `布长内共 ${groupThousands(total.toString())} 个对花点，已全部列出（位置区间 0 ≤ x ≤ 布长）。`;
+  }
+
+  renderAvoidance(result.avoidance || null, result);
+}
+
+/* ---------------- 布面瑕疵避让统计 ---------------- */
+
+/** 渲染禁印区间避让统计；av 为 null（未设置区间）时隐藏面板。 */
+function renderAvoidance(av, result) {
+  if (!av) {
+    els.avoidancePanel.hidden = true;
+    return;
+  }
+  els.avoidancePanel.hidden = false;
+  els.avInputCount.textContent = String(av.inputCount);
+  els.avMergedCount.textContent = String(av.mergedIntervals.length);
+  els.avMergedList.textContent = av.mergedIntervals
+    .map((iv) => `[${groupThousands(iv.start)}, ${groupThousands(iv.end)}]`)
+    .join('　');
+  els.avExcluded.textContent = groupThousands(av.excluded);
+  els.avUsable.textContent = groupThousands(av.usable);
+
+  const cloth = BigInt(result.clothLength);
+  els.avPositionsBody.innerHTML = '';
+  for (let n = 0; n < av.positions.length; n++) {
+    const p = av.positions[n];
+    const remain = cloth - BigInt(p);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${n + 1}</td><td>${groupThousands(p)}</td><td>${groupThousands(remain.toString())}</td>`;
+    els.avPositionsBody.appendChild(tr);
+  }
+
+  const usable = BigInt(av.usable);
+  const shown = BigInt(av.positions.length);
+  if (usable === 0n) {
+    els.avPositionsNote.textContent =
+      '布长内的对花点全部落在禁印区间内，没有可用位置：请调整禁印区间、布长或色筒参数后重新计算。';
+  } else if (usable > shown) {
+    els.avPositionsNote.textContent =
+      `仅显示最早的 ${av.limit} 个可用位置；扣除禁印区间后可用对花点共 ${groupThousands(av.usable)} 个。`;
+  } else {
+    els.avPositionsNote.textContent =
+      `扣除禁印区间后可用对花点共 ${groupThousands(av.usable)} 个，已全部列出。`;
   }
 }
 
@@ -418,6 +550,25 @@ els.btnRemove.addEventListener('click', () => {
 
 els.rollersBody.addEventListener('input', scheduleSolve);
 els.cloth.addEventListener('input', scheduleSolve);
+
+els.btnAddInterval.addEventListener('click', () => {
+  const rows = intervalRows();
+  if (rows.length >= 20) return;
+  els.intervalsBody.appendChild(intervalRow(rows.length + 1));
+  updateIntervalUI();
+});
+
+els.intervalsBody.addEventListener('click', (e) => {
+  const btn = e.target.closest('.btn-del-interval');
+  if (!btn) return;
+  btn.closest('tr').remove();
+  renumberIntervals();
+  updateIntervalUI();
+  scheduleSolve();
+});
+
+els.intervalsBody.addEventListener('input', scheduleSolve);
+
 els.btnSolve.addEventListener('click', solve);
 els.btnSave.addEventListener('click', () => saveScheme('update'));
 els.btnSaveAs.addEventListener('click', () => saveScheme('create'));

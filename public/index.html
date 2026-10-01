@@ -58,6 +58,25 @@
           <input id="cloth-length" type="text" inputmode="numeric" placeholder="例如：1000000" />
         </div>
 
+        <div class="intervals-head">
+          <h2>禁印区间（布面瑕疵避让，至多 20 个）</h2>
+          <button id="btn-add-interval" type="button" class="btn btn-secondary">＋ 添加区间</button>
+        </div>
+        <div class="table-wrap">
+          <table class="intervals-table">
+            <thead>
+              <tr>
+                <th style="width:4rem">#</th>
+                <th>起点（毫米）</th>
+                <th>终点（毫米）</th>
+                <th style="width:5rem"></th>
+              </tr>
+            </thead>
+            <tbody id="intervals-body"></tbody>
+          </table>
+        </div>
+        <p class="hint">禁印区间为闭区间（端点也不可印花），需满足 0 ≤ 起点 ≤ 终点 ≤ 布长；重叠或相邻的区间在计算时自动合并，区间随方案一起保存。</p>
+
         <p class="hint">提示：所有整数均按任意精度十进制处理，可安全输入超过 JavaScript 安全整数范围（2<sup>53</sup>−1）的数值；对花位置范围取 <code>0 ≤ x ≤ 布长</code>（含布头 0 mm 与布长端点）。</p>
 
         <div class="form-actions">
@@ -139,6 +158,42 @@
             </table>
           </div>
           <p id="positions-note" class="hint"></p>
+
+          <!-- 布面瑕疵避让统计（设置了禁印区间时显示） -->
+          <div id="avoidance-panel" hidden>
+            <h3>布面瑕疵避让（禁印区间）</h3>
+            <table class="kv-table">
+              <tbody>
+                <tr>
+                  <th>禁印区间</th>
+                  <td>录入 <span class="big-num" id="av-input-count"></span> 个，合并后 <span class="big-num" id="av-merged-count"></span> 个</td>
+                </tr>
+                <tr>
+                  <th>合并后区间（毫米）</th>
+                  <td id="av-merged-list"></td>
+                </tr>
+                <tr>
+                  <th>被排除对花点</th>
+                  <td><span class="big-num" id="av-excluded"></span> 个</td>
+                </tr>
+                <tr>
+                  <th>可用对花点总数</th>
+                  <td><span class="big-num" id="av-usable"></span> 个</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h3>最早 20 个可用对花位置</h3>
+            <div class="table-wrap">
+              <table class="positions-table">
+                <thead>
+                  <tr><th style="width:4rem">序号</th><th style="width:30%">距布头（毫米）</th><th>剩余布长（毫米）</th></tr>
+                </thead>
+                <tbody id="av-positions-body"></tbody>
+              </table>
+            </div>
+            <p id="av-positions-note" class="hint"></p>
+          </div>
         </div>
       </section>
     </section>

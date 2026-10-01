@@ -126,6 +126,30 @@ table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
 .hint { color: var(--muted); font-size: 0.8rem; margin: 0.7rem 0 0; }
 code { background: #eef2f6; padding: 0.05rem 0.35rem; border-radius: 3px; font-size: 0.85em; }
 
+/* ---------- 禁印区间 ---------- */
+.intervals-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 1rem 0 0.6rem;
+}
+.intervals-head h2 { margin: 0; font-size: 1.05rem; }
+.intervals-table th, .intervals-table td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+}
+.intervals-table th { background: #eef2f6; font-weight: 600; white-space: nowrap; }
+.intervals-table input { width: 100%; }
+.interval-index { font-weight: 600; text-align: center; color: var(--primary); }
+.interval-actions { text-align: center; }
+.intervals-empty td { color: var(--muted); text-align: center; font-size: 0.85rem; }
+#av-merged-list {
+  font-family: Consolas, Menlo, monospace;
+  font-size: 0.86rem;
+  word-break: break-all;
+}
+
 .form-actions { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.9rem; flex-wrap: wrap; }
 .save-status { font-size: 0.82rem; color: var(--muted); }
 
